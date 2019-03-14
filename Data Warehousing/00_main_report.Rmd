@@ -1,0 +1,564 @@
+---
+title: "ETM 538, Winter '19, Project"
+author: " Jordan Hilton 
+          Andey Nunes 
+          Mengyu Li 
+          Peter Boss"
+date: "March 13, 2019"
+output: pdf_document
+subtitle: Predicting Blood Donations
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# BEFORE KNITTING THIS DOCUMENT, ENSURE THAT THE FOLLOWING PACKAGES
+# ARE INSTALLED & UPDATED 
+
+packages <- c("caret", "class", "corrplot", "e1071", "knitr", "Metrics", "pander", "ranger", "rpart", "rpart.plot", "rsample", "tidyverse")
+
+lapply(packages, require, character.only = T)
+
+options(digits = 4, scipen = 999)
+
+set.seed(123)
+```
+
+
+### Introduction  
+
+We are analyzing a data set on blood donations, obtained from a recent Driven Data competition: https://www.drivendata.org/competitions/2/warm-up-predict-blood-donations/. The goal of the competition is to use data on past donations to predict whether a donation was made by a specific patient in the month of March 2007.  
+
+If our model successfully predicts donations, we can meet the business goal of creating accurate forecasting for blood donations. While the data in this specific instance comes from a blood donation truck in Taiwan, having a reliable predictive model would help blood donations services, hospitals, and the healthcare system at large---they could plan for storage and transportation of blood products, determine appropriate staffing levels, have more reliable schedules for procedures that require blood, etc. Having a more robust understanding of blood donation practices between countries could also help governments determine and employ best practices for encouraging regular and predictable blood donation from more people.  
+
+Our analysis uses 4 models:
+\begin{enumerate}
+\item Naive linear regression  
+\item K Nearest Neighbors  
+\item Decision Tree 
+\item Cross-validation with random forest, which includes another linear regression  
+\end{enumerate}
+
+Using lowest error rate in the predictions as the criterion, we determined that the strongest model is 
+
+Note: # # # ADD THE SPECIFIC ERROR INFO HERE # # #  
+
+
+-------
+
+-------
+
+-------
+
+
+### Initial Data Exploration  
+
+```{r load data}
+training <- read_csv("projectdata.csv")
+glimpse(training)
+```
+
+The data set comprises 576 observations on each of the variables below. To facilitate easier analysis, we have renamed the variables.  
+
++ A count variable, functioning as a unique ID for each person who donated blood. This was not a meaningful component of our analysis, so we ignored it in our models.
++ `Months since Last Donation` indicates how many months since the most recent donation event. Renamed as `recency`.
++ `Months since First Donation` indicates the total time span in months since the first donation event. Renamed as `time`.
++ `Number of Donations`. Renamed as `freq`, for "frequency."
++ `Total Volume Donated (c.c.)`. The original data set makes note that this field indicates the monetary measure being used for the business case. Renamed as `vol`, for "volume."
++ `Made Donation in March 2007`. The binary variable that we are trying to classify and predict. Renamed as `target`.  
+
+```{r correlations}
+# remove ID variable
+training <- training[,-1]
+
+# create and apply a vector of names
+names(training) <- c("recency", "freq", "vol", "time", "target")
+training_mat <- data.matrix(training, rownames.force = T)
+
+```
+
+
+We examine a plot of the correlations between the variables:  
+```{r, out.width="80%", echo=FALSE}
+corr_mat <- cor(training_mat)
+corrplot.mixed(corr_mat)
+
+```
+
+We see there is a perfect correlation between `freq` and `vol`. We note that the `vol` values are exactly 250 times the `freq` values, implying that people are donating exactly 250 CCs at a time. Since `vol` is an exact linear multiple of another variable, we do not include it in our analyses. 
+
+
+-------
+
+-------
+
+-------
+
+
+### Model 1: Naive Linear Regression  
+
+Our first model is ordinary linear regression. We chose this model because it's a typical starting point for data analysis, and it's easy to run and interpret. As discussed below, the results did not prove to be useful, but we still consider it a valuable starting point.  
+
+<!--
+First we load and inspect our data.  
+
+```{r load linear model}
+data <- read.csv("projectdata.csv")
+data <- data[,-1]
+names(data)
+names(data) <- c("recency", "freq", "vol", "time", "target")
+head(data)
+```
+
+As noted above, `vol` is a linear multiple of `freq`.  Including both would cause problems in a linear model because one is a linear multiple of the other, so `vol` was not included here.  
+
+```{r dropandcale, echo=FALSE}
+#data<-data[-c(1,4)]
+```
+
+-->
+
+We create and inspect the linear model.  
+
+```{r linearmodel}
+linearmodel <- lm(target ~ recency + freq + time, data=data)
+summary(linearmodel)
+```
+
+
+While the model as a whole is statistically significant with a p-value of $2.6 \cdot 10^{-15}$, the low $R^2$ indicates that our 3 independent variables do a poor job predicting blood donation in the linear model. Each variable is significant in the full linear model, but we formally check that it's appropriate to use each variable.  
+
+```{r lm step}
+step(linearmodel)
+```
+
+Each variable does contribute sufficiently to a reduction in the sum of the squares of error, and we can't reduce our AIC by eliminating a variable. We examine the standard residual plots to verify the errors are normally distributed.  
+
+```{r lm plot, out.width="50%"}
+plot(linearmodel)
+```
+
+The residual plots all look awful. Most notably, each plot splits the errors into two distinct groups. The most basic checks for normality are violated in each graph, and there are high leverage points. We conclude that the data does not follow a normal distribution, so linear regression is inappropriate for this data set. Much of the difficulty with this analysis probably comes from the fact that the response variable is binary. If we were continuing to apply regression, logistic regression would probably be appropriate here. Instead, we chose types of analysis that were more in line with the material learned in this class.  
+
+Note: This model does not include interactions between the input variables, but we also tried a linear regression model including those interactions. The $R^2$ value was slightly higher but still far too low to be useful (0.16 rather than 0.11), and the errors also exhibited the same problem of lack of normality. We conclude that including variable interactions did not help make linear regression appropriate for this data. The analysis was very similar to what has already been presented, so it is omitted here.  
+
+```{r lm_int, include=FALSE}
+# a version of the linear model that includes interaction between the input variables
+# there was no significant difference between the models, so this one is omitted
+
+linearmodel_int <- lm(target ~ recency * freq * time - recency:time, data=data)
+summary(linearmodel_int)
+
+step(linearmodel_int)
+plot(linearmodel_int)
+```
+
+
+
+-------
+
+### Model 2: K Nearest Neighbors  
+
+```{r knn load, echo=FALSE}
+data <- read.csv("projectdata.csv")
+instances <- data[-c(1,4,6)] ##drop the index column and the result column for working purposes
+```
+
+We begin our Nearest Neighbor analysis by scaling each column by the maximum value. Every entry in the columns is now between 0 and 1. Next we assign weights to each variable.  
+
+```{r knn assignweights}
+weights <- c(1/74,1/50,1/12500,1/98) ## make a vector of independent variable weights, scaling each by the max value to start
+names(weights) <- c("monthssincelast", "numberdonations", "monthssincefirst")  ##name them so we don't forget
+scaledinstances <- cbind(instances[,1]*weights[1],instances[,2]*weights[2],instances[,3]*weights[3])
+## make a scaled version of our instances so that the distances are equivalent
+```
+
+We divide our working data into two buckets: one for training, and one for calculating nearest neighbors to assign weights.
+
+```{r knn bucketize}
+practicebucket <- scaledinstances[501:576,]
+databucket <- scaledinstances[1:500,]
+```
+
+We write a function to calculate distances between two different points. We choose the Euclidean distance for two reasons. One, some of our data is in numeric form instead of factors, so Euclidean distance is more appropriate for those values. Two, we will compare our results against a prebuilt nearest-neighbors package, and that package is keyed to Euclidean distance.  
+
+```{r knn calculatedistance}
+distance <- function(x,y){
+  result <- dist(rbind(x,y), method="euclidean") ## find the manhattan distance between two instances
+  return(as.numeric(result)) #the result is weirdly vectorized so we just grab the value out of it
+}
+```
+
+Here is an example of the distance calculation, working on one of our practice points and one of our data points.  
+
+```{r knn example1}
+databucket[1,]
+practicebucket[1,]
+distance(databucket[1,], practicebucket[1,])
+```
+
+We create a table to calculate the distances between each of our practice points and each of the training points. Each column, iterated on $j$, is a practice point. Each row, iterated on $i$, is a data point.  
+
+```{r knn distancestable}
+distancesbyrow <- data.frame() #length(data) rows iterated by i for data, length(practice) columns iterated by j for practice
+
+for(i in 1:length(databucket[,1])){
+  for(j in 1:length(practicebucket[,1])){
+    distancesbyrow[i,j]<-distance(databucket[i,],practicebucket[j,])  # calculate the distance between every  possible row and data row, store the results
+  }
+}
+
+head(distancesbyrow[,1:6])
+```
+
+We create a table to tabulate the results: which point in the data is nearest the $i$th practice point, and what is the value of that point for our `target` variable (whether or not a donation was made). We were concerned about possible cases where multiple points were nearest but that recommended different `target` outcomes.  But no such "ambiguous" values actually appeared in the analysis.  
+
+```{r knn resultstable}
+distanceresults <- data.frame() #length(practice) rows, one for each test case. first column is minimum distances, second column is occurences of the minimum distance
+
+for(i in 1:length(practicebucket[,1])){ #traversing across our practice data
+  distanceresults[i,1]<-min(distancesbyrow[,i]) #the minimum distance for each column of distancesbyrow
+  distanceresults[i,2]<-sum(distanceresults[i,1]==distancesbyrow[,i]) #the number of occurences of this minimum value
+  distanceresults[i,3]<-data[which.min(distancesbyrow[,i]),6] ## pulls the "donation" value for the first index which has the minimum value
+  for(j in 1:length(practicebucket[,1])){ ## traversing across the distances for one possible case
+    if(distancesbyrow[j,i]==distanceresults[i,1] & data[j,6]!=distanceresults[i,3]){
+     distanceresults[i,3]<-"amb"
+    } ## if the distance for this case is minimum AND the playvalue is not equal to the first playvalue stored, rewrite the playvalue to be ambiguous
+  }
+}
+
+colnames(distanceresults)<-c("minimumdistance","occurrences", "donation")
+head(distanceresults)
+sum(distanceresults$occurrences==1) # the number of possible classes that have a unique closest neighbor in the data
+sum(distanceresults$donation=="amb") # the number of unambiguous results
+```
+
+We compare the results of our training against the real donation values, and we calculate the error rate.  
+
+```{r knn errorrate}
+predictedresults<-distanceresults[,3]
+originaldata <- data[501:576,6]
+correctanswers <- sum(predictedresults==originaldata)
+errorrate_knn <- 1 - correctanswers/length(originaldata)
+errorrate_knn
+```
+
+The error rate is `r round(errorrate_knn * 100, 1)`%.  
+
+Ordinarily, our next step would be to adjust the weight vector and re-run the analysis, with a goal of minimizing the error rate. In this instance, though, there are robust existing R packages that we can use to compare results. We employ the `class` package to see another approach to the problem.  
+
+```{r knn usinglibrary}
+train<-databucket
+test<-practicebucket
+cl<-data[1:500,6]
+libraryresults<-knn(train, test, cl, k=3, prob=TRUE)
+libraryresults
+```
+
+We've chose $k = 3$ nearest neighbors, and the library returns (in the first result) the winning classification for each test row, and also the probability of that classification based on the nearest neighbors. We calculate the error rate:  
+
+```{r knn libraryerror}
+predictedresults<-as.numeric(libraryresults)-1
+originaldata<-data[501:576,6]
+correctanswers<-sum(predictedresults==originaldata)
+errorrate<-1-correctanswers/length(originaldata)
+errorrate
+```
+
+Using the same code, we checked the error rate considering the 1, 2, 3, 4 nearest neighbors:
+
+```{r knn whichk}
+k<-c(1,2,3,4)
+error<-c("18.4%", "13.1%", "9.2%",  "10.5%")
+pander(cbind(k,error))
+```
+
+We note that the error decreases until $k = 3$, then increases when $k = 4$. We want to avoid overfitting, so we choose $k = 3$ nearest neighbors for the analysis. We note that the built-in package has slightly smaller error than our manual work even at $k=1$, and that at $k=3$ the error rate is half of what it was in our original work.
+
+The data contest (from Data Driven) includes a specific set of test data. Here are our model's predictions against those data points.  
+
+```{r knn predictions}
+testdata<-read.csv("project test data.csv")
+testdata<-testdata[-c(1,4,6)]
+testdata<-cbind(testdata[,1]*weights[1],testdata[,2]*weights[2],testdata[,3]*weights[3])
+train<-scaledinstances
+test<-testdata
+cl<-data[,6]
+libraryfullresults<-knn(train, test, cl, k=, prob=TRUE)
+head(libraryfullresults)
+```
+
+
+-------
+
+### Model 3: Decision Tree
+In this section, we first check the strcution of data frame which consist of 576 observation of 6 variables. 
+```{r}
+dfRawData <- read.csv('projectdata.csv')
+str(dfRawData)
+```
+## Pre-process data
+In this section, data is cleared and prepared ready for processing.
+```{r}
+dfModelData <- dfRawData[-1] # Exclude the first column
+dfModelData <- na.omit(dfModelData) # remove any NAs
+colnames(dfModelData) <- c('MonthsSinceLastDonation', 'NumberOfDonations', 'TotalVolumeDonatedCC', 'MonthsSinceFirestDonation', 'MadeDonationInMarch2007')
+dfModelData$MadeDonationInMarch2007 <- as.factor(dfModelData$MadeDonationInMarch2007)
+```
+
+## Split data into train and test data
+In this section, we create the train data and test date. By using p=0.8, it means the data split should be done in 80:20 ratio. And before training decision tree classifier, set.seed().
+```{r}
+# Split the data into training and test set
+set.seed(123)
+# 80% of data are selected as train data
+trnSamples <- dfModelData$MadeDonationInMarch2007 %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+trnData <- dfModelData[trnSamples, ]
+testData <- dfModelData[-trnSamples, ]
+```
+
+##Trained decision tree classifier result.
+We check the result of our train()method by a print dtree_fit variable. It's showing us the accuracy metrics or different values of cp as the following.
+We also used cross validation to divide it into 10 folds.
+```{r}
+control <- trainControl(method = 'repeatedcv', number = 10, repeats = 5)
+# Train the model
+model_DT <- train(MadeDonationInMarch2007 ~., data = trnData, method = 'rpart',  parms = list(split = "information"), tuneLength = 10) #trcontrol = control,
+# Estimate variable importantce
+model_DT
+```
+From above, the cp= 0.04337671. We are ready to predict classes for our test set, and use predict()method.
+```{r}
+prp(model_DT$finalModel, box.palette = "Reds", tweak = 1.2)
+```
+##Confusion Matrix
+The following result shows that the classifier with thre criterion as information gain is giving 0.7193 of accuracy for the test set.
+The prediction accuracy of 0.7193, which means that the percentage that the actual/prefernce result is 0, and the prediction result is 0;  the actual is 1, and that prediction result is 1 is 0.7193. The error rate = 1- accuracy = 0.2807, kappa =0.1817, which means the kappa coefficient is slight.
+```{r}
+test_pred <- predict(model_DT, newdata = testData)
+confusionMatrix(test_pred, testData$MadeDonationInMarch2007 )  #check accuracy
+```
+
+
+
+-------
+
+### Model 4: Cross Validation Folds & Splits  
+
+The workflow and code used here is adapted from the *Machine Learning in the Tidyverse* course by Dmitriy Gorenshteyn (DataCamp 2019). The approach involves using list-columns to store list objects (such as model output) in a tibble, which is a special R data frame. These lists can then be iterated over with specialized `map` functions from the `purrr` package to calculate and extract information.
+
+Using the training data, we will create a 5-fold cross-validation split tibble. This will set us up to itertively generate multiple models on our new train/validation subsets.
+
+```{r create vfold}
+# using the rsample library
+cv_split <- vfold_cv(training, v = 5)
+# cv_split  # uncomment the front of this line if you want to preview
+```
+
+The `cv_split` object has five rows and two columns. The first column, `splits`, is a list column containing the training and validation data. The second column is a character vector containing the fold id generated by the `vfold_cv()` function. We can iterate over the `splits` column and extract the train and validation columns 
+```{r make train & validation}
+cv_data <- cv_split %>%
+   mutate(train = map(splits, ~training(.x)),
+          validate = map(splits, ~testing(.x)))
+glimpse(cv_data)
+```
+We've just created two new list columns containing the data that we can now train and validate models over.
+
+# Model preparation
+
+### linear model
+
+```{r linear model}
+cv_models_lm <- cv_data %>%
+   mutate(lm_model = map(train, ~lm(formula = target~., data = .x)))
+```
+
+
+### other models
+use the linear model and random forest model code chunks as examples for making another object holding the cross-validation data sets and the specified models.
+
+
+
+### random forest
+
+```{r random forest model}
+# set forest parameter
+n_trees <- 500
+# Build a random forest model for each fold
+cv_models_rf <- cv_data %>% 
+  mutate(rf_model = map(train, ~ranger(formula = target~., data = .x,
+                                    num.trees = n_trees,)))
+```
+
+
+
+
+
+# Model evaluation
+
+The *cross-validation model evaluation process* follows the same general set of steps iterated over each fold:
+1. extract the actual target values from the validation set
+2. use the models to make target predictions that will be compared to the actual target
+3. for each fold, calculate the Mean Absolute Error (`MAE`) where $$ MAE = \frac{\sum^n_{i=1}|Actual_i - Predicted_i|}{n} $$
+4. Take the average over all MAE values to determine which model performs best on these sets of training & validation splits
+
+In the following subsections, the eval code chunk follows a similar pattern: 
+
++ the *actual* and *predicted* values are extracted from the validation sets into a `cv_prep_`
+
+
+Lets see how other models and randocompared.
+
+### linear model
+
+```{r lm predict}
+# extract actual values
+cv_prep_lm <- cv_models_lm %>%
+   mutate(validate_actual = map(validate, ~.x$target),
+          validate_predicted = map2(.x = lm_model, .y = validate, 
+                                    ~predict(.x, .y)))
+```
+
+
+```{r lm eval}
+# the function mae() is from library(Metrics)
+# Calculate the mean absolute error for each validate fold 
+cv_eval_lm <- cv_prep_lm %>% 
+  mutate(validate_mae = map2_dbl(.x = validate_actual, 
+                                 .y = validate_predicted, 
+                                 ~mae(actual = .x, predicted = .y)))
+
+# Print the validate_mae column
+cv_eval_lm$validate_mae
+
+```
+
+The average mean absolute error across all linear models was `r mean(cv_eval_lm$validate_mae)`.
+
+
+
+### other models
+use the linear model and random forest model code chunks as examples for making another object holding the cross-validation data sets and the specified models.
+
+### random forest
+
+```{r rf predict}
+# Generate predictions using the random forest model
+cv_prep_rf <- cv_models_rf %>% 
+  mutate(validate_actual = map(validate, ~.x$target),
+         validate_predicted = map2(.x = rf_model, .y = validate, ~predict(.x, .y)$predictions))
+```
+
+```{r rf eval}
+
+# Calculate validate MAE for each fold
+cv_eval_rf <- cv_prep_rf %>% 
+  mutate(validate_mae = map2_dbl(validate_actual, validate_predicted, ~mae(actual = .x, predicted = .y)))
+
+# Print the validate_mae column
+cv_eval_rf$validate_mae
+
+# Calculate the mean of validate_mae column
+mean(cv_eval_rf$validate_mae)
+```
+
+**Tune hyper-parameters**
+
+```{r hyper parameters}
+
+# Prepare for tuning cross validation folds by varying mtry
+cv_tune <- cv_data %>% 
+   crossing(mtry = 1:3)
+
+# Build a model for each fold & mtry combination
+cv_model_tunerf <- cv_tune %>% 
+  mutate(rf_model = 
+            map2(.x = train, .y = mtry, 
+                 ~ranger(formula = target~., data = .x, 
+                         mtry = .y, num.trees = n_trees)))
+
+glimpse(cv_model_tunerf) 
+```
+
+
+```{r rf mae}
+# Generate validate predictions for each model
+cv_prep_tunerf <- cv_model_tunerf %>% 
+  mutate(rf_validate_actual = map(validate, ~.x$target),
+     rf_validate_predicted = map2(.x = rf_model, .y = validate, ~predict(.x, .y)$predictions))
+
+# Calculate validate MAE for each fold and mtry combination
+cv_eval_tunerf <- cv_prep_tunerf %>% 
+  mutate(rf_validate_mae = map2_dbl(.x = rf_validate_actual, .y = rf_validate_predicted, ~mae(actual = .x, predicted = .y)))
+
+# Calculate the mean validate_mae for each mtry used  
+cv_eval_tunerf %>% 
+  group_by(mtry) %>% 
+  summarise(rf_mean_mae = mean(rf_validate_mae))
+
+```
+
+Select random forest model with the lowest average mae.
+
+```{r best mtry}
+best <- filter(cv_eval_tunerf, rf_validate_mae == min(cv_eval_tunerf$rf_validate_mae))
+kable(tibble(id = best$id, mtry = best$mtry))
+```
+
+Use these parameters to traing our best rf model.
+```{r select best rf model}
+# Build the model using all training data and the best performing parameter
+best_model <- ranger(formula = target~., data = training,
+                     mtry = best$mtry, num.trees = n_trees)
+```
+
+
+# Model Output on Test Data
+
+```{r load test data}
+test_data <- read_csv("project test data.csv")
+names(test_data) <- c("id", "recency", "freq", "vol", "time")
+# remove id
+head(test_data)
+test <- select(test_data,-id, -vol)
+```
+
+
+```{r predict test data vector}
+# Predict life_expectancy for the testing_data
+#test_predicted <- predict(best_model, test)$predictions
+#rf_test_prediction <- cbind(test_data$id, test_predicted)
+
+```
+
+
+# Discussion
+
+
+
+
+# References
+
+Data is courtesy of Yeh, I-Cheng via the UCI Machine Learning repository (https://archive.ics.uci.edu/ml/datasets/Blood+Transfusion+Service+Center)
+
+https://archive.ics.uci.edu/ml/machine-learning-databases/blood-transfusion/transfusion.names
+
+Code examples were borrowed from DataCamp course material presented by Dmitriy Gorenshteyn, "Machine Learning in the Tidyverse" https://www.datacamp.com/courses/machine-learning-in-the-tidyverse
+
+# Appendix
+
+```{r random forest predicted test vector, include=F, eval=F}
+kable(rf_test_prediction)
+```
+
+
+
+
+
+
+
+
+
+
+
