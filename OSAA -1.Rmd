@@ -1,0 +1,296 @@
+---
+title: "Untitled"
+author: "Mengyu Li"
+date: "November 23, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(maps)
+library(mapdata)
+suppressMessages(library("tidyverse"))
+library(ggmap)
+library(DT)
+library(geosphere)
+library(here)
+library (pander, quietly = TRUE)
+library (magrittr, quietly = TRUE) #Used for pipes/dplyr
+library(dplyr)
+library (ROI, quietly = TRUE)
+library (ROI.plugin.glpk, quietly = TRUE)
+library (ROI.plugin.symphony, quietly = TRUE)
+library (ompr, quietly = TRUE)
+library (ompr.roi, quietly = TRUE)
+library(readxl)
+library(plotly)
+```
+
+```{r}
+
+
+##PART 2 - LOAD THE REQUIRED DATASET AND GET GEOCODING FOR ALL SCHOOLS
+Football <- read_excel("C:/Users/Michelle/Desktop/OSAA/Prj.xls")
+pander(head(Football))
+
+##At this point we can start creating the matrix of distances to figure out the new leagues
+# Setting locations as one, rather than separate columns
+Football$location <- paste0(Football$Address, ",", Football$City, ", OR ", Football$'Zip Code')
+Football$location
+
+# This function geocodes a location (find latitude and longitude) using the Data Science toolkit
+geo <- geocode(location = Football$location, output="latlon", source="dsk")
+
+# pasting new lon/lat info to Football table
+Football$lon <- geo$lon
+Football$lat <- geo$lat
+
+# making a smaller table w/ just longitude and latitude to figure out distances
+geo_school <- cbind(Football$lon, Football$lat)
+colnames(geo_school) <- c("Longitude", "Latitude")
+
+# lets take a look at the table of distances to make sure all is correct, but we don't want to
+# put any extra columns into the geo_school table, so we'll just create a new table that we 
+# save as csv 
+geo_school_csv <- geo_school
+rownames(geo_school_csv) <- Football$School
+
+#Write new data to csv so we can work from that
+write.csv(geo_school_csv, file = "lat_lon_6A.csv")
+
+#read the csv into the program
+geo_school_csv <- read_csv("lat_lon_6A.csv")
+#View(geo_school_csv)
+
+
+###PART 2.1 - CALCULATE TOTAL MILEAGE OF CURRENT OSAA LEAGUES TRAVEL
+##First, we'll make separate tables for each of the leagues within the 6A classification
+sixA_lat_lon <- cbind.data.frame(Football$School, geo_school, Football$`Regular League`)
+#Here we make a dataframe w/ the school names, their latitude/longitude, and their listed regular league.
+
+sixA_L1 <- subset(sixA_lat_lon, Football$`Regular League` =="1 Portland Interscholastic League")
+#Here we make a subset of the table above, so that we only see schools within a specific league
+#First, we'll look at League 1, which is the Portland Interscholastic League
+
+sixA_L1_geo <- cbind.data.frame(sixA_L1$Longitude, sixA_L1$Latitude)
+#Here a make a new table w/ only the longitude and latitude of the schools within the league selected above
+#Specifically,  League 1, which is the Portland Interscholastic League
+#I have to make this new table because the distGeo function below will only work with a table w/ 2 columns
+
+dist_L1 <- distm(sixA_L1_geo, fun = distGeo)/1609.344
+# Here we create the distance matrix for schools within the Portland Interscholastic League
+#Dividing by 1609 to convert from meters to miles 
+
+sum(dist_L1)
+#Add up all the distances to get total mileage for schools within the Portland Interscholastic League
+
+##Then we'll repeat the above for each of the leagues within the 6A classification
+
+# 2 Metro League
+sixA_L2 <- subset(sixA_lat_lon, Football$`Regular League` =="2 Metro League")
+sixA_L2_geo <- cbind.data.frame(sixA_L2$Longitude, sixA_L2$Latitude)
+dist_L2 <- distm(sixA_L2_geo, fun = distGeo)/1609.344
+
+# 3 Pacific Conference
+sixA_L3 <- subset(sixA_lat_lon, Football$`Regular League` =="3 Pacific Conference")
+sixA_L3_geo <- cbind.data.frame(sixA_L3$Longitude, sixA_L3$Latitude)
+dist_L3 <- distm(sixA_L3_geo, fun = distGeo)/1609.344
+
+# 4 Mt. Hood Conference
+sixA_L4 <- subset(sixA_lat_lon, Football$`Regular League` =="4 Mt. Hood Conference")
+sixA_L4_geo <- cbind.data.frame(sixA_L4$Longitude, sixA_L4$Latitude)
+dist_L4 <- distm(sixA_L4_geo, fun = distGeo)/1609.344
+
+# 5 Three Rivers League
+sixA_L5 <- subset(sixA_lat_lon, Football$`Regular League` =="5 Three Rivers League")
+sixA_L5_geo <- cbind.data.frame(sixA_L5$Longitude, sixA_L5$Latitude)
+dist_L5 <- distm(sixA_L5_geo, fun = distGeo)/1609.344
+
+# 6 Mountain Valley Conference
+sixA_L6 <- subset(sixA_lat_lon, Football$`Regular League` =="6 Mountain Valley Conference")
+sixA_L6_geo <- cbind.data.frame(sixA_L6$Longitude, sixA_L6$Latitude)
+dist_L6 <- distm(sixA_L6_geo, fun = distGeo)/1609.344
+
+# 7 Southwest Conference
+sixA_L7 <- subset(sixA_lat_lon, Football$`Regular League` =="7 Southwest Conference")
+sixA_L7_geo <- cbind.data.frame(sixA_L7$Longitude, sixA_L7$Latitude)
+dist_L7 <- distm(sixA_L7_geo, fun = distGeo)/1609.344
+
+##Now that baseline distances are collected, we'll put all into one neat table
+sum_col <- rbind(sum(dist_L1), sum(dist_L2), sum(dist_L3),sum(dist_L4),sum(dist_L5),sum(dist_L6), sum(dist_L7), (sum(dist_L1, dist_L2, dist_L3, dist_L4, dist_L5, dist_L6, dist_L7)))
+sum_col_r <- round(sum_col, digits = 2)
+L_col <- rbind("1 Portland Interscholastic League", "2 Metro League", "3 Pacific Conference", 
+               "4 Mt. Hood Conference", "5 Three Rivers League","6 Mountain Valley Conference", 
+               "7 Southwest Conference", "Total 6A Mileage (all leagues)")
+Baseline <- cbind(L_col, sum_col_r)
+colnames(Baseline) <- c("6A Leagues", "Mileage")
+pander(Baseline, caption = "Current OSAA Leagues & Mileage")
+
+### PART 2.2 - DISTANCE MATRIX
+#turning the longitude latitude numbers into distances. 
+#Dividing by 1609 to convert from meters to miles
+distances <- distm(geo_school, fun = distGeo)/1609.344
+d <- round(distances, digits=2)
+
+#Connecting the school names to the distance matrix, columns and rows
+n <-Football$School
+colnames(d) <- n
+rownames(d) <- n
+
+#double check on object types (numbers should be #, words strings)
+str(d)
+
+dist_matrix <- d
+
+#Write new data to csv so we can work from that
+write.csv(d, file = "OSAADistance.csv")
+
+#read the csv into the program
+OSAADistance <- read_csv("OSAADistance.csv")
+#View(OSAADistance)
+```
+
+
+
+
+```{r}
+
+#----------------------------------------------------
+# Visualize locations of teams and pre-group teams into three (3) leagues
+#---------------------------------------------------
+
+dfGEO <- as.data.frame(geo_school)
+rownames(dfGEO) <- n 
+colnames(dfGEO) <- c('Longitude', 'Latitude')
+gg<- ggplot()
+gg <- gg + geom_point(data= dfGEO, aes(x = Longitude, y = Latitude, color ='red'))
+gg <- gg + coord_map()
+gg
+# 1st league
+l1 <- subset(dfGEO, Latitude < 44.5)
+l1
+# identify 2nd league
+gg <- NULL
+gg<- ggplot()
+gg <- gg + geom_point(data= filter(dfGEO, Latitude > 44.5), aes(x = Longitude, y = Latitude, color ='red'))
+gg <- gg + coord_map()
+ggplotly(gg)
+# 2nd league
+l2<-subset(dfGEO, Latitude <= 45.21869 & Latitude > 44.5)
+l2
+# Identify 3rd league
+l3<-subset(dfGEO, Latitude > 44.5 & Longitude >= -122.54)
+l3
+# Remaining Team Names
+rtn<-setdiff(setdiff(setdiff(rownames(dfGEO), rownames(l1)), rownames(l2)), rownames(l3))
+rtn
+
+#------------------------------------
+# Optimization models
+#------------------------------------
+# extract dist_matrix for the remaining teams of optimization
+dim(dist_matrix)
+dist_matrix_rt <- dist_matrix[rtn,rtn]
+mDist <- dist_matrix_rt
+nTeam <- nrow(mDist)
+minTeams <- 6
+maxTeams <- 8
+diag(mDist) <- 0
+
+```
+
+
+##Formula
+Here, we have $X_i_j$, $X_j_k$, $X_i_k$, to represent games between school i & schoolj, school j & school k, school i & school k.$x_i_j$ = 1 means school i and school j are in the same league  $D_i_j$ represents the distance travel between school i & j, our objective is to minimize the total distance to travel within the league. 
+
+$$
+ \begin{split}
+ \begin{aligned}
+    \text{Minimize  }  & \sum_{i} \sum_{j|j>i} D_{i,j} X_{i,j}*2 \\
+    \text{subject to }&\sum_{j>i}x_{i,j} + \sum_{k<i}x_{k,i}  >= minTeams-1, \forall i\\
+                       & \sum_{j>i}x_{i,j} + \sum_{k<i}x_{k,i}  <= maxTeams-1, \forall i\\
+                       & \ 1- x_{i,j} - x_{i,k} + x_{j,k}\geq 0; \forall \; i,j,k \wedge j>i,k>j\\
+                       & x_{i,j} \in(0,1)  \;;\forall i,j=1:nTeam\wedge j>i
+  \end{aligned}
+  \end{split}
+
+$$
+The optimizatin objective is to minimize the traveling distance between teams. The One-way trip between two teams can be calculated as $D_i_j$ * $X_i_j$. If the distance of round-trips is interested, the one-way distance needs to be multiplied by 2 to get the total distance. Neverthless, it is supposed to have no impact on the optimal solution.
+
+Given a full matrix (team number * team number) which has binary values to indicate if two teams in the league, the matrix is essentially symmetric by the diagnoa
+Considering the symmetric characteristic in the relationship matrix between teams, we only need to 
+
+
+
+
+
+##The 2nd constraint facilitates the interpretation of the minimum requirements in a league. Since the distance between a team and itself is 0, this constraint actually can help reduce the solution space.
+
+##The 3rd constraint ensures if teams i and team j in the same league AND teams i and team k in the same league, then teams j and k are in the same league. The beauty of the expression lies in its combination of the constraint of symmetry that effectively imposes reciprocal relationship between teams.
+
+
+
+
+
+```{r}
+# ------------------------------------
+# Optimization model 
+# ------------------------------------
+start_time <- Sys.time()
+result <- MIPModel() %>%
+  add_variable(x[i,j], j>i, i = 1:nTeam, j = 1:nTeam, type="binary") %>%
+  set_objective(sum_expr(2 * mDist[i,j]*x[i,j], j>i, i=1:nTeam, j=1:nTeam),"min") %>%
+  add_constraint(sum_expr(x[i,j], j>i, j=1:nTeam) + sum_expr(x[k,i], k<i, k=1:nTeam) >= minTeams - 1, i=1:nTeam) %>%
+  add_constraint(sum_expr(x[i,j], j>i, j=1:nTeam) + sum_expr(x[k,i], k<i, k=1:nTeam) <= maxTeams - 1, i=1:nTeam) %>%
+  add_constraint((1 - x[i, j] - x[i, k]) + x[j, k] >= 0, j>i, k>j, i=1:nTeam, j=1:nTeam, k=1:nTeam) %>%
+  solve_model(with_ROI(solver = "symphony"))
+end_time <- Sys.time() - start_time
+end_time
+print(solver_status(result))
+print(result)
+View(result$solution)
+
+#print(matrix(result$solution,ncol = nTeam))
+# extract leagues with teams from the results
+lsLeagues <- NULL
+mTeams <- matrix(0, nrow =  nrow(mDist), ncol =  nrow(mDist))
+fnFormTeamMatchMatrix <- function(mBase, vVals, nameLetter) {
+  m <- mBase
+  for (i in seq(1 : nrow(mBase)-1)){
+    for (j in seq(i+1: ncol(mBase))){
+      val <- vVals[paste0(nameLetter, '[', i, ',', j, ']')]
+      m[i, j] <- val
+    }
+  }
+  
+  for (j in seq(1: nrow(mBase))){
+    for (i in seq(1: j)){
+      m[j, i] <- m[i, j]
+    }
+  }
+  diag(m) <- 1
+  return(m)
+}
+
+fnLeaguesWithTeams <- function(m) {
+  for (i in seq(1 : nrow(m))){
+    lsLeagues[[i]] <- which(m[i,] %in% 1)
+  }
+  return(lsLeagues)
+}
+
+mTeamMatch <- matrix(0, nrow = nrow(mDist), ncol =  nrow(mDist))
+mTeamMatch <- fnFormTeamMatchMatrix(mTeamMatch, result$solution, 'x')
+View(mTeamMatch)
+lsLeagues <- unique(fnLeaguesWithTeams(mTeamMatch))
+lsLeagues # teams in each leagues
+lIdx <- 4
+for (i in lsLeagues){
+  print(paste0('League ', lIdx, ': '))
+  print(rtn[i])
+  lIdx <- lIdx +1
+}
+```
+
+
+
