@@ -30,7 +30,7 @@ library(plotly)
 
 
 ##PART 2 - LOAD THE REQUIRED DATASET AND GET GEOCODING FOR ALL SCHOOLS
-Football <- read_excel("C:/Users/Michelle/Desktop/OSAA/Prj.xls")
+Football <- read_excel("OSAA/Prj.xls")
 pander(head(Football))
 
 ##At this point we can start creating the matrix of distances to figure out the new leagues
